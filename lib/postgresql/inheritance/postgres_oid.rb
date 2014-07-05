@@ -34,12 +34,7 @@ ActiveSupport.on_load(:active_record) do
             
             def type_cast(value)
               return if value.nil?
-              value.to_i(2)
-            end
-            
-            def type_cast_for_write(value)
-              return unless value.present?
-              return value.to_s(2)
+              value
             end
           end
         end
