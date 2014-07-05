@@ -34,7 +34,7 @@ ActiveSupport.on_load(:active_record) do
             
             def type_cast(value)
               return if value.nil?
-              value
+              value.to_i(2)
             end
           end
         end
