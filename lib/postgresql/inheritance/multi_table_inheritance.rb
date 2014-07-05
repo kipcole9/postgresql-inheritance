@@ -167,8 +167,6 @@ module ActiveRecord
   end
 end
 
-
-
 # Handle methods which represent user created enum types
 module ActiveRecord
   module ConnectionAdapters

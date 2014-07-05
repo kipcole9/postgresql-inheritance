@@ -28,6 +28,15 @@ ActiveSupport.on_load(:active_record) do
               # ConnectionAdapters::PostgreSQLColumn.string_to_rgeo value
             end
           end
+          
+          class Varbit < Type
+            def type; :varbit; end
+            
+            def type_cast(value)
+              return if value.nil?
+              value
+            end
+          end
         end
       end
     end
@@ -41,6 +50,7 @@ ActiveSupport.on_load(:active_record) do
         private
 
         # Maps PostgreSQL-specific data types to logical Rails types.
+        # Used by schema_dumper to decide what column type to generate
         alias :simplified_type_without_geo :simplified_type
         def simplified_type(field_type)
           case field_type
@@ -50,6 +60,8 @@ ActiveSupport.on_load(:active_record) do
             :geography
           when 'point'
             :point
+          when /bit/i
+            :varbit
           else
             if ActiveRecord::Base.connection.enum_types.include?(field_type)
               :string
@@ -64,7 +76,7 @@ ActiveSupport.on_load(:active_record) do
 
   # Used in migrations to create columns.  Because we can't assume postgis is always
   # available (ie Heroku) we'll translate Geo types to Point if no postgis, and from Point
-  # to Geometry is there is.
+  # to Geometry if there is.
   module ActiveRecord
     module ConnectionAdapters
       class PostgreSQLAdapter
@@ -92,12 +104,17 @@ ActiveSupport.on_load(:active_record) do
               column(name, 'point', options)
             end
           end
+          
+          def varbit(name, options = {})
+            column(name, 'varbit', options)
+          end
         end
       
         base_types = NATIVE_DATABASE_TYPES.dup
         geo_types = {geography: {name: 'geography'}, geometry: {name: 'geometry'}, point: {name: 'point'}}
+        other_types = {varbit: {name: 'varbit'}}
         self.send(:remove_const, :NATIVE_DATABASE_TYPES)
-        self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types))
+        self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types).merge(other_types))
       end
     end
   end
@@ -107,6 +124,7 @@ ActiveSupport.on_load(:active_record) do
     register_type 'geography',  ::ActiveRecord::ConnectionAdapters::PostgreSQLAdapter::OID::Geography.new
     register_type 'geometry',   ::ActiveRecord::ConnectionAdapters::PostgreSQLAdapter::OID::Geometry.new
     register_type 'point',      ::ActiveRecord::ConnectionAdapters::PostgreSQLAdapter::OID::Point.new
+    register_type 'varbit',     ::ActiveRecord::ConnectionAdapters::PostgreSQLAdapter::OID::Varbit.new
     alias_type 'regclass',      'text'
 
     # Register enum types as well
