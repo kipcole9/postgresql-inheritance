@@ -172,7 +172,7 @@ module ActiveRecord
           INNER JOIN pg_catalog.pg_namespace ON (pg_extension.extnamespace = pg_namespace.oid) 
         SQL
         res = exec_query(sql, "SCHEMA")
-        res.rows.map { |r| [res.column_types['extname'].type_cast(r.first), res.column_types['nspname'].type_cast(r.second)] }
+        res.rows
       end
       
       def sequences_with_namespace
@@ -182,7 +182,7 @@ module ActiveRecord
           WHERE relkind = 'S';
         SQL
         res = exec_query(sql, "SCHEMA")
-        res.rows.map { |r| [res.column_types['relname'].type_cast(r.first), res.column_types['nspname'].type_cast(r.second)] }
+        res.rows
       end
       
       # CASCADE added since we may have inherited tables and when :force => true
