@@ -167,11 +167,27 @@ module ActiveRecord
   end
 end
 
-# Handle methods which represent user created enum types
+# Handle methods which represent user created enum types and geo types
 module ActiveRecord
   module ConnectionAdapters
-    class PostgreSQLAdapter
-      module ColumnMethods
+    module PostgreSQL
+      class TableDefinition
+        def geometry(name, options = {})
+          if ActiveRecord::Base.connection.extensions.include? 'postgis'
+            column(name, 'geometry', options)
+          else
+            point(name, options)
+          end
+        end
+      
+        def geography(name, options = {})
+          if ActiveRecord::Base.connection.extensions.include? 'postgis'
+            column(name, 'geography', options)
+          else
+            point(name, options)
+          end             
+        end
+        
         def method_missing(method, *args, &block)
           if ActiveRecord::Base.connection.enum_type_exists? method.to_s
             options = args.extract_options!

@@ -47,29 +47,12 @@ ActiveSupport.on_load(:active_record) do
   # to Geometry if there is.
   module ActiveRecord
     module ConnectionAdapters
-      class PostgreSQLAdapter
-        class TableDefinition
-          def geometry(name, options = {})
-            if ActiveRecord::Base.connection.extensions.include? 'postgis'
-              column(name, 'geometry', options)
-            else
-              point(name, options)
-            end
-          end
-        
-          def geography(name, options = {})
-            if ActiveRecord::Base.connection.extensions.include? 'postgis'
-              column(name, 'geography', options)
-            else
-              point(name, options)
-            end             
-          end
-        end
-      
+      class PostgreSQLAdapter      
         base_types = NATIVE_DATABASE_TYPES.dup
         geo_types = {geography: {name: 'geography'}, geometry: {name: 'geometry'}}
+        enum_type = {enum: {name: 'enum'}}
         self.send(:remove_const, :NATIVE_DATABASE_TYPES)
-        self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types))
+        self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types).merge(enum_type))
       end
     end
   end
@@ -79,5 +62,9 @@ ActiveSupport.on_load(:active_record) do
     conn.type_map.register_type 'geography',  ::ActiveRecord::Type::Geography.new
     conn.type_map.register_type 'geometry',   ::ActiveRecord::Type::Geometry.new
     conn.type_map.alias_type 'regclass',      'text'
+    
+    #ActiveRecord::Base.connection.enum_types.each do |enum|
+    #  conn.type_map.register_type enum, ::ActiveRecord::ConnectionAdapters::PostgreSQL::OID::Enum.new
+    #end
   end
 end
