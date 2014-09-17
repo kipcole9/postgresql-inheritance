@@ -149,6 +149,20 @@ module ActiveRecord
         end
       end
       
+      def create_composite(name, options = {})
+        schema_creation = ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.new(ActiveRecord::Base.connection)
+        composite_definition = ActiveRecord::Base.connection.send :create_table_definition, :t, nil, {}
+        yield composite_definition
+        column_creation = composite_definition.columns.map{|col| schema_creation.send :visit_ColumnDefinition, col }.join(', ')
+        composite_sql = <<-SQL
+          CREATE TYPE #{name} AS (
+            #{column_creation}
+          )
+        SQL
+        execute composite_sql
+      end
+      
+      
       def drop_enum(name)
         execute "DROP TYPE IF EXISTS #{name}"
         @enum_list = nil
