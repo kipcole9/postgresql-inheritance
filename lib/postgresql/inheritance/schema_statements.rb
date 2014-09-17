@@ -154,18 +154,26 @@ module ActiveRecord
         composite_definition = ActiveRecord::Base.connection.send :create_table_definition, :t, nil, {}
         yield composite_definition
         column_creation = composite_definition.columns.map{|col| schema_creation.send :visit_ColumnDefinition, col }.join(', ')
-        composite_sql = <<-SQL
-          CREATE TYPE #{name} AS (
-            #{column_creation}
-          )
-        SQL
+        composite_sql = "CREATE TYPE #{name} AS (#{column_creation})"
         execute composite_sql
+        
+        # Register the type
+        # ActiveRecord::Base.connection.tap do |conn|
+        #  conn.type_map.register_type name,  options[:klass_name]
+        # end
       end
       
+      def drop_composite(name)
+        drop_type(name)
+      end
       
       def drop_enum(name)
-        execute "DROP TYPE IF EXISTS #{name}"
+        drop_type(name)
         @enum_list = nil
+      end
+      
+      def drop_type(name)
+        execute "DROP TYPE IF EXISTS #{name}"
       end
       
       def enum_types
