@@ -82,6 +82,17 @@ module ActiveRecord
         SQL
         exec_query(enum_query, "SCHEMA").any?
       end
+      
+      def composite_type_exists?(composite)
+        composite_query = <<-SQL
+          SELECT pg_type.typname
+          FROM pg_type 
+          WHERE pg_type.typname = '#{composite.to_s}'
+           AND pg_type.typtype = 'c';
+        SQL
+        exec_query(composite_query, "SCHEMA").any?
+      end     
+      
 
     private 
       def in_schema_search_path?(schema)
