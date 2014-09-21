@@ -67,7 +67,7 @@ module ActiveRecord
       # Should not be called normally, but this operation is non-destructive.
       # The migrations module handles this automatically.
       def initialize_schema_migrations_table
-        puts "Initializing schema migrations with schema search path as #{ActiveRecord::Base.connection.schema_search_path}"
+        # puts "Initializing schema migrations with schema search path as #{ActiveRecord::Base.connection.schema_search_path}"
         ActiveRecord::SchemaMigration.create_table
       end
       
@@ -93,7 +93,6 @@ module ActiveRecord
         exec_query(composite_query, "SCHEMA").any?
       end     
       
-
     private 
       def in_schema_search_path?(schema)
         schema_search_paths.include? schema.to_s
@@ -160,21 +159,17 @@ module ActiveRecord
         end
       end
       
-      def create_composite(name, options = {})
+      def create_composite_type(name, options = {})
         schema_creation = ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.new(ActiveRecord::Base.connection)
         composite_definition = ActiveRecord::Base.connection.send :create_table_definition, :t, nil, {}
         yield composite_definition
         column_creation = composite_definition.columns.map{|col| schema_creation.send :visit_ColumnDefinition, col }.join(', ')
-        composite_sql = "CREATE TYPE #{name} AS (#{column_creation})"
+        qualified_name = [options[:schema], name].join('.')
+        composite_sql = "CREATE TYPE #{qualified_name} AS (#{column_creation})"
         execute composite_sql
-        
-        # Register the type
-        # ActiveRecord::Base.connection.tap do |conn|
-        #  conn.type_map.register_type name,  options[:klass_name]
-        # end
       end
       
-      def drop_composite(name)
+      def drop_composite_type(name)
         drop_type(name)
       end
       
@@ -196,6 +191,30 @@ module ActiveRecord
               ON pg_enum.enumtypid = pg_type.oid;
         SQL
         @enum_list ||= exec_query(enum_query, "SCHEMA").group_by{|e| e['enumtype']}.keys
+      end
+      
+      def composite_types
+        composite_query = <<-SQL
+          SELECT t.typname AS name
+              FROM pg_catalog.pg_type t
+              LEFT JOIN pg_catalog.pg_namespace n
+                  ON n.oid = t.typnamespace
+              WHERE ( t.typrelid = 0
+                      OR ( SELECT c.relkind = 'c'
+                              FROM pg_catalog.pg_class c
+                              WHERE c.oid = t.typrelid
+                          )
+                  )
+                  AND NOT EXISTS
+                      ( SELECT 1
+                          FROM pg_catalog.pg_type el
+                          WHERE el.oid = t.typelem
+                              AND el.typarray = t.oid
+                      )
+                  AND n.nspname = 'types'
+                  AND pg_catalog.pg_type_is_visible ( t.oid )
+        SQL
+        @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten
       end
       
       def extensions_with_namespace
@@ -261,6 +280,10 @@ module ActiveRecord
         SQL
         res = exec_query(sql, "SCHEMA")
         res.rows.try(:first).try(:first)
+      end
+      
+      def schema_for_composite_type(composite_type)
+        'types'
       end
       
       def schema_search_paths

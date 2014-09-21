@@ -28,8 +28,8 @@ module ActiveRecord
       header(stream)
       schemas(stream)
       extensions(stream)
-      sequences(stream)
       enums(stream)
+      composite_types(stream)
       tables(stream)
       trailer(stream)
       stream
@@ -75,8 +75,8 @@ HEADER
     
     def schemas(stream)
       if (search_paths = @connection.schema_search_paths).any?
-        search_paths = search_paths - @connection.shared_schemas
-        stream.puts "  # Create schemas (except shared schemas) configured in search_path option in database.yml" 
+        search_paths = search_paths - ['public']
+        stream.puts "  # Create schemas (except public schema) configured in search_path option in database.yml" 
         search_paths.each do |schema|
           stream.puts "  create_schema #{schema.inspect}"
         end
@@ -91,18 +91,6 @@ HEADER
         stream.puts "  # These are extensions that must be enabled in order to support this database"
         extensions.each do |extension|
           stream.puts "  enable_extension #{extension.first.inspect}, schema: #{extension.second.inspect}"
-        end
-        stream.puts
-      end
-    end
-    
-    # This way we can place sequences in a specific schema so they are shared
-    def sequences(stream)
-      sequences = @connection.sequences_with_namespace.select{|s| @connection.shared_schemas.include? s.second.inspect}
-      if sequences.any?
-        stream.puts "  # Shared Database sequences"
-        sequences.each do |sequence|
-          stream.puts "  create_sequence #{sequence.first.inspect}, schema: #{sequence.second.inspect}"
         end
         stream.puts
       end
@@ -130,6 +118,29 @@ HEADER
             stream.puts "  create_enum :#{enum}, #{values.map(&:to_sym).inspect}"
           end        
         end
+        stream.puts
+      end
+    end
+    
+    # User defined composite types
+    # HACK: contrained to be in the 'types' schema since there is a lot of "noise" in the composite type space
+    def composite_types(stream)
+      @connection.composite_types.each do |composite_type|
+        schema = @connection.schema_for_composite_type(composite_type)
+        if @connection.shared_schemas.include?(schema)
+          stream.puts "  create_composite_type :#{composite_type}, schema: :#{schema} do |t|"
+        else
+          stream.puts "  create_composite_type :#{composite_type} do |t|"
+        end
+        column_specs = @connection.columns(composite_type).map do |column|
+          @connection.column_spec(column, @types)
+        end.compact
+        
+        column_specs.each do |s|
+          options = s.reject{|k, v| [:name,:type].include? k}.values
+          stream.puts "    t.#{s[:type]}\t#{s[:name]}, #{options.join(', ')}"
+        end
+        stream.puts "  end"
         stream.puts
       end
     end
@@ -195,7 +206,7 @@ HEADER
 
         # then dump all non-primary key columns that are not inherited from a parent table
         column_specs = columns.map do |column|
-          raise StandardError, "Unknown type '#{column.sql_type}' for column '#{column.name}' with type #{column.type}" if @types[column.type].nil?
+          # raise StandardError, "Unknown type '#{column.sql_type}' for column '#{column.name}' with type #{column.type}" if @types[column.type].nil?
           next if column.name == pk
           next if parent_column_names && parent_column_names.include?(column.name)
           @connection.column_spec(column, @types)
