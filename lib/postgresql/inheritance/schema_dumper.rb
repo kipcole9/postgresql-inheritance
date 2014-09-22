@@ -258,7 +258,7 @@ HEADER
     end
 
     # Output indexes but don't output indexes that are inherited from parent tables
-    # since those will be created by create_table.
+    # since those will be created by create_table.        
     def indexes(table, stream)
       if (indexes = @connection.indexes(table)).any?
         if parent_table = @connection.parent_table(table)
@@ -275,18 +275,22 @@ HEADER
             ('name: ' + index.name.inspect),
           ]
           statement_parts << 'unique: true' if index.unique
-
+          
           index_lengths = (index.lengths || []).compact
           statement_parts << ('length: ' + Hash[index.columns.zip(index.lengths)].inspect) unless index_lengths.empty?
-
+          
           index_orders = (index.orders || {})
           statement_parts << ('order: ' + index.orders.inspect) unless index_orders.empty?
-
+          
           statement_parts << ('where: ' + index.where.inspect) if index.where
-
+          
+          statement_parts << ('using: ' + index.using.inspect) if index.using
+          
+          statement_parts << ('type: ' + index.type.inspect) if index.type
+          
           '  ' + statement_parts.join(', ')
         end
-
+          
         stream.puts add_index_statements.sort.join("\n")
         stream.puts
       end
