@@ -116,194 +116,197 @@ end
 
 module ActiveRecord
   module ConnectionAdapters
-    module SchemaStatements
-      # Parent of inherited tabled
-      def parent_tables(table_name)
-        sql = <<-SQL
-          SELECT pg_namespace.nspname, pg_class.relname 
-          FROM pg_catalog.pg_inherits 
-            INNER JOIN pg_catalog.pg_class ON (pg_inherits.inhparent = pg_class.oid) 
-            INNER JOIN pg_catalog.pg_namespace ON (pg_class.relnamespace = pg_namespace.oid) 
-          WHERE inhrelid = '#{table_name}'::regclass
-        SQL
-        result = exec_query(sql, "SCHEMA")
-        result.map{|a| a['relname']}
-      end
+    module PostgreSQL
+      module SchemaStatements
+        # Parent of inherited tabled
+        def parent_tables(table_name)
+          sql = <<-SQL
+            SELECT pg_namespace.nspname, pg_class.relname 
+            FROM pg_catalog.pg_inherits 
+              INNER JOIN pg_catalog.pg_class ON (pg_inherits.inhparent = pg_class.oid) 
+              INNER JOIN pg_catalog.pg_namespace ON (pg_class.relnamespace = pg_namespace.oid) 
+            WHERE inhrelid = '#{table_name}'::regclass
+          SQL
+          result = exec_query(sql, "SCHEMA")
+          result.map{|a| a['relname']}
+        end
       
-      def parent_table(table_name)
-        parents = parent_tables(table_name)
-        parents.first
-      end
+        def parent_table(table_name)
+          parents = parent_tables(table_name)
+          parents.first
+        end
       
-      def add_index(table_name, column_name, options = {}) #:nodoc:
-        return if index_already_exists?(table_name, column_name, options) && !just_this_schema_in_search_path?(schema_for_table(table_name))
-        index_name, index_type, index_columns, index_options, index_algorithm, index_using = add_index_options(table_name, column_name, options)
-        execute "CREATE #{index_type} INDEX #{index_algorithm} #{quote_column_name(index_name)} ON #{quote_table_name(table_name)} #{index_using} (#{index_columns})#{index_options}"
-      end
+        def add_index(table_name, column_name, options = {}) #:nodoc:
+          return if index_already_exists?(table_name, column_name, options) && !just_this_schema_in_search_path?(schema_for_table(table_name))
+          index_name, index_type, index_columns, index_options, index_algorithm, index_using = add_index_options(table_name, column_name, options)
+          execute "CREATE #{index_type} INDEX #{index_algorithm} #{quote_column_name(index_name)} ON #{quote_table_name(table_name)} #{index_using} (#{index_columns})#{index_options}"
+        end
       
-      # Creates a schema for the given schema name.
-      def create_schema schema_name
-        exec_query("CREATE SCHEMA #{schema_name}") unless schema_exists?(schema_name)
-      end
+        # Creates a schema for the given schema name.
+        def create_schema schema_name
+          exec_query("CREATE SCHEMA #{schema_name}") unless schema_exists?(schema_name)
+        end
 
-      # Drops the schema for the given schema name.
-      def drop_schema schema_name
-        exec_query("DROP SCHEMA #{schema_name} CASCADE") if schema_exists?(schema_name)
-      end
+        # Drops the schema for the given schema name.
+        def drop_schema schema_name
+          exec_query("DROP SCHEMA #{schema_name} CASCADE") if schema_exists?(schema_name)
+        end
       
-      def create_enum(name, values, options = {})
-        unless enum_type_exists?(name)
-          full_name = options[:schema] ? "#{options[:schema]}.#{name}" : name
-          execute "CREATE TYPE #{full_name} AS ENUM (#{values.map{|v| quote(v.to_s)}.join(', ')})"
+        def create_enum(name, values, options = {})
+          unless enum_type_exists?(name)
+            full_name = options[:schema] ? "#{options[:schema]}.#{name}" : name
+            execute "CREATE TYPE #{full_name} AS ENUM (#{values.map{|v| quote(v.to_s)}.join(', ')})"
+            @enum_list = nil
+          end
+        end
+      
+        def create_composite_type(name, options = {})
+          return if composite_type_exists?(name)
+          schema_creation = ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.new(ActiveRecord::Base.connection)
+          composite_definition = ActiveRecord::Base.connection.send :create_table_definition, :t, nil, {}
+          yield composite_definition
+          column_creation = composite_definition.columns.map{|col| schema_creation.send :visit_ColumnDefinition, col }.join(', ')
+          qualified_name = [options[:schema], name].join('.')
+          composite_sql = "CREATE TYPE #{qualified_name} AS (#{column_creation})"
+          execute composite_sql 
+        end
+      
+        def drop_composite_type(name)
+          drop_type(name)
+        end
+      
+        def drop_enum(name)
+          drop_type(name)
           @enum_list = nil
         end
-      end
       
-      def create_composite_type(name, options = {})
-        schema_creation = ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.new(ActiveRecord::Base.connection)
-        composite_definition = ActiveRecord::Base.connection.send :create_table_definition, :t, nil, {}
-        yield composite_definition
-        column_creation = composite_definition.columns.map{|col| schema_creation.send :visit_ColumnDefinition, col }.join(', ')
-        qualified_name = [options[:schema], name].join('.')
-        composite_sql = "CREATE TYPE #{qualified_name} AS (#{column_creation})"
-        execute composite_sql
-      end
-      
-      def drop_composite_type(name)
-        drop_type(name)
-      end
-      
-      def drop_enum(name)
-        drop_type(name)
-        @enum_list = nil
-      end
-      
-      def drop_type(name)
-        execute "DROP TYPE IF EXISTS #{name}"
-      end
-      
-      def enum_types
-        enum_query = <<-SQL
-          SELECT pg_type.typname AS enumtype, 
-              pg_enum.enumlabel AS enumlabel
-          FROM pg_type 
-          JOIN pg_enum 
-              ON pg_enum.enumtypid = pg_type.oid;
-        SQL
-        @enum_list ||= exec_query(enum_query, "SCHEMA").group_by{|e| e['enumtype']}.keys
-      end
-      
-      def composite_types
-        composite_query = <<-SQL
-          SELECT t.typname AS name
-              FROM pg_catalog.pg_type t
-              LEFT JOIN pg_catalog.pg_namespace n
-                  ON n.oid = t.typnamespace
-              WHERE ( t.typrelid = 0
-                      OR ( SELECT c.relkind = 'c'
-                              FROM pg_catalog.pg_class c
-                              WHERE c.oid = t.typrelid
-                          )
-                  )
-                  AND NOT EXISTS
-                      ( SELECT 1
-                          FROM pg_catalog.pg_type el
-                          WHERE el.oid = t.typelem
-                              AND el.typarray = t.oid
-                      )
-                  AND n.nspname = 'types'
-                  AND pg_catalog.pg_type_is_visible ( t.oid )
-        SQL
-        @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten
-      end
-      
-      def extensions_with_namespace
-        sql = <<-SQL
-          SELECT pg_extension.extname, pg_namespace.nspname
-          FROM pg_catalog.pg_extension
-          INNER JOIN pg_catalog.pg_namespace ON (pg_extension.extnamespace = pg_namespace.oid) 
-        SQL
-        res = exec_query(sql, "SCHEMA")
-        res.rows
-      end
-      
-      def sequences_with_namespace
-        sql = <<-SQL
-          SELECT relname, nspname 
-          FROM pg_class JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace 
-          WHERE relkind = 'S';
-        SQL
-        res = exec_query(sql, "SCHEMA")
-        res.rows
-      end
-      
-      # CASCADE added since we may have inherited tables and when :force => true
-      # then they have to go as well.
-      def drop_table(table_name, options = {})
-        execute "DROP TABLE #{quote_table_name(table_name)} CASCADE"
-      end
-      
-      # Sets the schema search path to a string of comma-separated schema names.
-      # Names beginning with $ have to be quoted (e.g. $user => '$user').
-      # See: http://www.postgresql.org/docs/current/static/ddl-schemas.html
-      #
-      # This should be not be called manually but set in database.yml.
-      def schema_search_path=(schema_csv)
-        if schema_csv
-          execute("SET search_path TO #{schema_csv}")
-          @schema_search_path = schema_csv
+        def drop_type(name)
+          execute "DROP TYPE IF EXISTS #{name}"
         end
-      end
+      
+        def enum_types
+          enum_query = <<-SQL
+            SELECT pg_type.typname AS enumtype, 
+                pg_enum.enumlabel AS enumlabel
+            FROM pg_type 
+            JOIN pg_enum 
+                ON pg_enum.enumtypid = pg_type.oid;
+          SQL
+          @enum_list ||= exec_query(enum_query, "SCHEMA").group_by{|e| e['enumtype']}.keys
+        end
+      
+        def composite_types
+          composite_query = <<-SQL
+            SELECT t.typname AS name
+                FROM pg_catalog.pg_type t
+                LEFT JOIN pg_catalog.pg_namespace n
+                    ON n.oid = t.typnamespace
+                WHERE ( t.typrelid = 0
+                        OR ( SELECT c.relkind = 'c'
+                                FROM pg_catalog.pg_class c
+                                WHERE c.oid = t.typrelid
+                            )
+                    )
+                    AND NOT EXISTS
+                        ( SELECT 1
+                            FROM pg_catalog.pg_type el
+                            WHERE el.oid = t.typelem
+                                AND el.typarray = t.oid
+                        )
+                    AND n.nspname = 'types'
+                    AND pg_catalog.pg_type_is_visible ( t.oid )
+          SQL
+          @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten
+        end
+      
+        def extensions_with_namespace
+          sql = <<-SQL
+            SELECT pg_extension.extname, pg_namespace.nspname
+            FROM pg_catalog.pg_extension
+            INNER JOIN pg_catalog.pg_namespace ON (pg_extension.extnamespace = pg_namespace.oid) 
+          SQL
+          res = exec_query(sql, "SCHEMA")
+          res.rows
+        end
+      
+        def sequences_with_namespace
+          sql = <<-SQL
+            SELECT relname, nspname 
+            FROM pg_class JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace 
+            WHERE relkind = 'S';
+          SQL
+          res = exec_query(sql, "SCHEMA")
+          res.rows
+        end
+      
+        # CASCADE added since we may have inherited tables and when :force => true
+        # then they have to go as well.
+        def drop_table(table_name, options = {})
+          execute "DROP TABLE #{quote_table_name(table_name)} CASCADE"
+        end
+      
+        # Sets the schema search path to a string of comma-separated schema names.
+        # Names beginning with $ have to be quoted (e.g. $user => '$user').
+        # See: http://www.postgresql.org/docs/current/static/ddl-schemas.html
+        #
+        # This should be not be called manually but set in database.yml.
+        def schema_search_path=(schema_csv)
+          if schema_csv
+            execute("SET search_path TO #{schema_csv}")
+            @schema_search_path = schema_csv
+          end
+        end
 
-      # Returns the active schema search path.
-      def schema_search_path
-        #@schema_search_path ||= query('SHOW search_path', 'SCHEMA')[0][0]
-        @schema_search_path = query('SHOW search_path', 'SCHEMA')[0][0]
-      end
+        # Returns the active schema search path.
+        def schema_search_path
+          #@schema_search_path ||= query('SHOW search_path', 'SCHEMA')[0][0]
+          @schema_search_path = query('SHOW search_path', 'SCHEMA')[0][0]
+        end
       
-      def schema_for_table(table_name)
-        schema_list = schema_search_paths.map{|s| '\'' + s.strip + '\''}.join(',')
-        sql = "SELECT schemaname FROM pg_tables where tablename = '#{table_name}' and schemaname in (#{schema_list})"
-        res = exec_query sql, "SCHEMA"
-        res.rows.try(:first).try(:first)
-      end
+        def schema_for_table(table_name)
+          schema_list = schema_search_paths.map{|s| '\'' + s.strip + '\''}.join(',')
+          sql = "SELECT schemaname FROM pg_tables where tablename = '#{table_name}' and schemaname in (#{schema_list})"
+          res = exec_query sql, "SCHEMA"
+          res.rows.try(:first).try(:first)
+        end
       
-      def schema_for_enum(enum_name)
-        sql = <<-SQL
-          select n.nspname as enum_schema,  
-                 t.typname as enum_name
-          from pg_type t 
-             join pg_enum e on t.oid = e.enumtypid  
-             join pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-          where t.typname = '#{enum_name}'
-          group by n.nspname, t.typname;
-        SQL
-        res = exec_query(sql, "SCHEMA")
-        res.rows.try(:first).try(:first)
-      end
+        def schema_for_enum(enum_name)
+          sql = <<-SQL
+            select n.nspname as enum_schema,  
+                   t.typname as enum_name
+            from pg_type t 
+               join pg_enum e on t.oid = e.enumtypid  
+               join pg_catalog.pg_namespace n ON n.oid = t.typnamespace
+            where t.typname = '#{enum_name}'
+            group by n.nspname, t.typname;
+          SQL
+          res = exec_query(sql, "SCHEMA")
+          res.rows.try(:first).try(:first)
+        end
       
-      def schema_for_composite_type(composite_type)
-        'types'
-      end
+        def schema_for_composite_type(composite_type)
+          'types'
+        end
       
-      def schema_search_paths
-        schema_search_path.split(',').map(&:strip)
-      end
+        def schema_search_paths
+          schema_search_path.split(',').map(&:strip)
+        end
       
-      def default_search_path
-        @default_search_path ||= Rails.configuration.database_configuration[Rails.env]['schema_search_path'] 
-      end
+        def default_search_path
+          @default_search_path ||= Rails.configuration.database_configuration[Rails.env]['schema_search_path'] 
+        end
       
-      def shared_search_path
-        @shared_search_path ||= (Rails.configuration.database_configuration[Rails.env]['shared_schemas'] || 'public')
-      end
+        def shared_search_path
+          @shared_search_path ||= (Rails.configuration.database_configuration[Rails.env]['shared_schemas'] || 'public')
+        end
       
-      def shared_schemas
-        @shared_schemas ||= shared_search_path.split(',')
-      end
+        def shared_schemas
+          @shared_schemas ||= shared_search_path.split(',')
+        end
       
-      def extensions_schema
-        @extensions_schema ||= Rails.configuration.database_configuration[Rails.env]['extensions_schema'] || 'public'
+        def extensions_schema
+          @extensions_schema ||= Rails.configuration.database_configuration[Rails.env]['extensions_schema'] || 'public'
+        end
       end
     end
   end

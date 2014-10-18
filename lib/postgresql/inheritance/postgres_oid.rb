@@ -47,12 +47,12 @@ ActiveSupport.on_load(:active_record) do
   # to Geometry if there is.
   module ActiveRecord
     module ConnectionAdapters
-      class PostgreSQLAdapter      
-        base_types = NATIVE_DATABASE_TYPES.dup
-        geo_types = {geography: {name: 'geography'}, geometry: {name: 'geometry'}}
-        enum_type = {enum: {name: 'enum'}}
-        self.send(:remove_const, :NATIVE_DATABASE_TYPES)
-        self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types).merge(enum_type))
+      class PostgreSQLAdapter
+        # base_types = NATIVE_DATABASE_TYPES.dup
+        # geo_types = {geography: {name: 'geography'}, geometry: {name: 'geometry'}}
+        # enum_type = {enum: {name: 'enum'}}
+        # self.send(:remove_const, :NATIVE_DATABASE_TYPES)
+        # self.const_set(:NATIVE_DATABASE_TYPES, base_types.merge(geo_types).merge(enum_type))
       end
     end
   end
