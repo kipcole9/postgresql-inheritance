@@ -56,7 +56,7 @@ ActiveSupport.on_load(:active_record) do
         def native_database_types
           @additional_db_types ||= {
             geography:  {name: 'geography'}, 
-            geometry:   {name: 'geometry'}
+            geometry:   {name: 'geometry'},
           }.merge(NATIVE_DATABASE_TYPES)
         end
         

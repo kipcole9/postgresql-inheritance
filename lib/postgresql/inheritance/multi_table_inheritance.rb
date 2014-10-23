@@ -195,6 +195,9 @@ module ActiveRecord
           elsif ActiveRecord::Base.connection.composite_type_exists? method.to_s
             options = args.extract_options!
             column(args[0], method.to_s, options)
+          elsif ActiveRecord::Base.connection.domain_type_exists? method.to_s
+            options = args.extract_options!
+            column(args[0], method.to_s, options)
           else
             super
           end

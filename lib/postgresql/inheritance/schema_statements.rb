@@ -131,16 +131,15 @@ module ActiveRecord
         end
       
         def create_enum(name, values, options = {})
-          unless enum_type_exists?(name)
-            full_name = options[:schema] ? "#{options[:schema]}.#{name}" : name
+          full_name = options[:schema] ? "#{options[:schema]}.#{name}" : name.to_s
+          unless enum_type_exists?(full_name)
             execute "CREATE TYPE #{full_name} AS ENUM (#{values.map{|v| quote(v.to_s)}.join(', ')})"
-            @enum_list = nil
           end
         end
       
         def create_domain(name, options = {})
           full_name = options[:schema] ? "#{options[:schema].to_s}.#{name.to_s}" : name.to_s
-          unless domain_exists?(full_name)
+          unless domain_type_exists?(full_name)
             execute "CREATE DOMAIN #{full_name} AS #{options[:as]}"
           end
         end
@@ -162,7 +161,6 @@ module ActiveRecord
       
         def drop_enum(name)
           drop_type(name)
-          @enum_list = nil
         end
       
         def drop_type(name)
@@ -175,13 +173,12 @@ module ActiveRecord
       
         def enum_types
           enum_query = <<-SQL
-            SELECT pg_type.typname AS enumtype, 
-                pg_enum.enumlabel AS enumlabel
+            SELECT pg_type.typname AS enumtype
             FROM pg_type 
             JOIN pg_enum 
-                ON pg_enum.enumtypid = pg_type.oid;
+              ON pg_enum.enumtypid = pg_type.oid;
           SQL
-          @enum_list ||= exec_query(enum_query, "SCHEMA").group_by{|e| e['enumtype']}.keys
+          exec_query(enum_query, "SCHEMA").rows.flatten.uniq
         end
       
         def composite_types
@@ -202,49 +199,35 @@ module ActiveRecord
                             WHERE el.oid = t.typelem
                                 AND el.typarray = t.oid
                         )
-                    AND n.nspname = 'types'
+                    AND n.nspname <> 'pg_catalog'
+                    AND n.nspname <> '#{extensions_schema}'
                     AND pg_catalog.pg_type_is_visible ( t.oid )
           SQL
-          @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten
+          @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten - enum_types - domain_types
         end
         
         def domain_types
+          sql = "SELECT domain_name FROM information_schema.domains WHERE domain_schema <> 'information_schema'"
+          exec_query(sql, "SCHEMA").rows.flatten
+        end
+        
+        def domains_with_type_and_namespace
           sql = "SELECT domain_schema, domain_name, data_type FROM information_schema.domains WHERE domain_schema <> 'information_schema'"
           exec_query(sql, "SCHEMA").rows
         end
         
-        def domain_exists?(full_name)
-          schema, name = full_name.split('.')
-          if name.nil? # No schema supplied
-            name = schema
-            sql = "SELECT domain_name FROM information_schema.domains WHERE domain_name = '#{name}'"
-          else
-            sql = "SELECT domain_name FROM information_schema.domains WHERE domain_schema = '#{schema}' AND domain_name = '#{name}'"
-          end
-          exec_query(sql, "SCHEMA").any?
+        def domain_type_exists?(domain)
+          domain_types.include? domain
         end
         
         def enum_type_exists?(enum)
-          enum_query = <<-SQL
-            SELECT pg_type.typname AS enumtype, 
-                pg_enum.enumlabel AS enumlabel
-            FROM pg_type 
-            JOIN pg_enum 
-                ON pg_enum.enumtypid = pg_type.oid
-            WHERE pg_type.typname = '#{enum.to_s}';
-          SQL
-          exec_query(enum_query, "SCHEMA").any?
+          enum_types.include? enum
         end
 
         def composite_type_exists?(composite)
-          composite_query = <<-SQL
-            SELECT pg_type.typname
-            FROM pg_type 
-            WHERE pg_type.typname = '#{composite.to_s}'
-             AND pg_type.typtype = 'c';
-          SQL
-          exec_query(composite_query, "SCHEMA").any?
-        end      
+          composite_types.include? composite
+        end
+             
         def extensions_with_namespace
           sql = <<-SQL
             SELECT pg_extension.extname, pg_namespace.nspname
@@ -306,12 +289,33 @@ module ActiveRecord
             where t.typname = '#{enum_name}'
             group by n.nspname, t.typname;
           SQL
-          res = exec_query(sql, "SCHEMA")
-          res.rows.try(:first).try(:first)
+          exec_query(sql, "SCHEMA").rows.flatten.try(:first)
         end
       
         def schema_for_composite_type(composite_type)
-          'types'
+          composite_query = <<-SQL
+            SELECT n.nspname AS name
+                FROM pg_catalog.pg_type t
+                LEFT JOIN pg_catalog.pg_namespace n
+                    ON n.oid = t.typnamespace
+                WHERE ( t.typrelid = 0
+                        OR ( SELECT c.relkind = 'c'
+                                FROM pg_catalog.pg_class c
+                                WHERE c.oid = t.typrelid
+                            )
+                    )
+                    AND NOT EXISTS
+                        ( SELECT 1
+                            FROM pg_catalog.pg_type el
+                            WHERE el.oid = t.typelem
+                                AND el.typarray = t.oid
+                        )
+                    AND n.nspname <> 'pg_catalog'
+                    AND n.nspname <> '#{extensions_schema}'
+                    AND pg_catalog.pg_type_is_visible ( t.oid )
+                    AND typname = '#{composite_type}'
+          SQL
+          exec_query(composite_query, "SCHEMA").rows.flatten.try(:first)
         end
       
         def schema_search_paths

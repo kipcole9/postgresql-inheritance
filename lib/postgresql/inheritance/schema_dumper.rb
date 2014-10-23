@@ -125,7 +125,7 @@ HEADER
     
     # Domains
     def domains(stream)
-      domains = @connection.domain_types
+      domains = @connection.domains_with_type_and_namespace
       if domains.any?
         stream.puts "  # These are user defined domains for this application"
         domains.each do |domain|
@@ -136,25 +136,28 @@ HEADER
     end
     
     # User defined composite types
-    # HACK: contrained to be in the 'types' schema since there is a lot of "noise" in the composite type space
     def composite_types(stream)
-      @connection.composite_types.each do |composite_type|
-        schema = @connection.schema_for_composite_type(composite_type)
-        if @connection.shared_schemas.include?(schema)
-          stream.puts "  create_composite_type :#{composite_type}, schema: :#{schema} do |t|"
-        else
-          stream.puts "  create_composite_type :#{composite_type} do |t|"
-        end
-        column_specs = @connection.columns(composite_type).map do |column|
-          @connection.column_spec(column, @types)
-        end.compact
+      composite_types = @connection.composite_types
+      if composite_types.any?
+        stream.puts "  # These are user defined composite data types for this application"
+        composite_types.each do |composite_type|
+          schema = @connection.schema_for_composite_type(composite_type)
+          if @connection.shared_schemas.include?(schema)
+            stream.puts "  create_composite_type :#{composite_type}, schema: :#{schema} do |t|"
+          else
+            stream.puts "  create_composite_type :#{composite_type} do |t|"
+          end
+          column_specs = @connection.columns(composite_type).map do |column|
+            @connection.column_spec(column, @types)
+          end.compact
         
-        column_specs.each do |s|
-          options = s.reject{|k, v| [:name,:type].include? k}.values
-          stream.puts "    t.#{s[:type]}\t#{s[:name]}, #{options.join(', ')}"
+          column_specs.each do |s|
+            options = s.reject{|k, v| [:name,:type].include? k}.values
+            stream.puts "    t.#{s[:type]}\t#{s[:name]}, #{options.join(', ')}"
+          end
+          stream.puts "  end"
+          stream.puts
         end
-        stream.puts "  end"
-        stream.puts
       end
     end
 
