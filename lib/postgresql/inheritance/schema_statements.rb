@@ -69,29 +69,7 @@ module ActiveRecord
       def initialize_schema_migrations_table
         # puts "Initializing schema migrations with schema search path as #{ActiveRecord::Base.connection.schema_search_path}"
         ActiveRecord::SchemaMigration.create_table
-      end
-      
-      def enum_type_exists?(enum)
-        enum_query = <<-SQL
-          SELECT pg_type.typname AS enumtype, 
-              pg_enum.enumlabel AS enumlabel
-          FROM pg_type 
-          JOIN pg_enum 
-              ON pg_enum.enumtypid = pg_type.oid
-          WHERE pg_type.typname = '#{enum.to_s}';
-        SQL
-        exec_query(enum_query, "SCHEMA").any?
-      end
-      
-      def composite_type_exists?(composite)
-        composite_query = <<-SQL
-          SELECT pg_type.typname
-          FROM pg_type 
-          WHERE pg_type.typname = '#{composite.to_s}'
-           AND pg_type.typtype = 'c';
-        SQL
-        exec_query(composite_query, "SCHEMA").any?
-      end     
+      end    
       
     private 
       def in_schema_search_path?(schema)
@@ -160,6 +138,13 @@ module ActiveRecord
           end
         end
       
+        def create_domain(name, options = {})
+          full_name = options[:schema] ? "#{options[:schema].to_s}.#{name.to_s}" : name.to_s
+          unless domain_exists?(full_name)
+            execute "CREATE DOMAIN #{full_name} AS #{options[:as]}"
+          end
+        end
+      
         def create_composite_type(name, options = {})
           return if composite_type_exists?(name)
           schema_creation = ActiveRecord::ConnectionAdapters::AbstractAdapter::SchemaCreation.new(ActiveRecord::Base.connection)
@@ -182,6 +167,10 @@ module ActiveRecord
       
         def drop_type(name)
           execute "DROP TYPE IF EXISTS #{name}"
+        end
+        
+        def drop_domain(name)
+          execute "DROP DOMAIN IF EXISTS #{name} CASCADE"
         end
       
         def enum_types
@@ -218,7 +207,44 @@ module ActiveRecord
           SQL
           @composite_types ||= exec_query(composite_query, "SCHEMA").rows.flatten
         end
-      
+        
+        def domain_types
+          sql = "SELECT domain_schema, domain_name, data_type FROM information_schema.domains WHERE domain_schema <> 'information_schema'"
+          exec_query(sql, "SCHEMA").rows
+        end
+        
+        def domain_exists?(full_name)
+          schema, name = full_name.split('.')
+          if name.nil? # No schema supplied
+            name = schema
+            sql = "SELECT domain_name FROM information_schema.domains WHERE domain_name = '#{name}'"
+          else
+            sql = "SELECT domain_name FROM information_schema.domains WHERE domain_schema = '#{schema}' AND domain_name = '#{name}'"
+          end
+          exec_query(sql, "SCHEMA").any?
+        end
+        
+        def enum_type_exists?(enum)
+          enum_query = <<-SQL
+            SELECT pg_type.typname AS enumtype, 
+                pg_enum.enumlabel AS enumlabel
+            FROM pg_type 
+            JOIN pg_enum 
+                ON pg_enum.enumtypid = pg_type.oid
+            WHERE pg_type.typname = '#{enum.to_s}';
+          SQL
+          exec_query(enum_query, "SCHEMA").any?
+        end
+
+        def composite_type_exists?(composite)
+          composite_query = <<-SQL
+            SELECT pg_type.typname
+            FROM pg_type 
+            WHERE pg_type.typname = '#{composite.to_s}'
+             AND pg_type.typtype = 'c';
+          SQL
+          exec_query(composite_query, "SCHEMA").any?
+        end      
         def extensions_with_namespace
           sql = <<-SQL
             SELECT pg_extension.extname, pg_namespace.nspname

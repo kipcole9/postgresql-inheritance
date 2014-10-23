@@ -29,6 +29,7 @@ module ActiveRecord
       schemas(stream)
       extensions(stream)
       enums(stream)
+      domains(stream)
       composite_types(stream)
       tables(stream)
       trailer(stream)
@@ -117,6 +118,18 @@ HEADER
           else
             stream.puts "  create_enum :#{enum}, #{values.map(&:to_sym).inspect}"
           end        
+        end
+        stream.puts
+      end
+    end
+    
+    # Domains
+    def domains(stream)
+      domains = @connection.domain_types
+      if domains.any?
+        stream.puts "  # These are user defined domains for this application"
+        domains.each do |domain|
+          stream.puts "  create_domain #{domain.second.inspect}, as: #{domain.third.inspect}, schema: #{domain.first.inspect}"
         end
         stream.puts
       end
