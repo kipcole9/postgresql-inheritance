@@ -248,7 +248,7 @@ module ActiveRecord
         spec.delete(:default) if spec[:default].nil?
         spec[:array] = 'true' if column.respond_to?(:array) && column.array
         spec[:default] = "\"#{column.default_function}\"" if column.default_function
-        if enum_types.include?(column.sql_type) || composite_types.include?(column.sql_type)
+        if enum_types.include?(column.sql_type) || composite_types.include?(column.sql_type) || domain_types.include?(column.sql_type)
           spec[:type] = column.sql_type 
           spec.delete(:limit)
         end
