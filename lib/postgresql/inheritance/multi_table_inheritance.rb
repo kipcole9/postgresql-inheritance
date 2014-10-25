@@ -96,12 +96,6 @@ module ActiveRecord
         raise ActiveRecord::AssociationTypeMismatch, message
       end
     end
-    
-    # TODO: Rails is moving to the ! version, so remove this
-    # version when Rails 4 next beta or release it out
-    # def raise_on_type_mismatch(record)
-    #   raise_on_type_mismatch!(record)
-    # end
   end
 end
 
